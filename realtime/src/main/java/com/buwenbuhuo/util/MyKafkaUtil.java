@@ -1,9 +1,12 @@
 package com.buwenbuhuo.util;
 
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import java.util.Properties;
@@ -15,9 +18,14 @@ import java.util.Properties;
  * Description:KafkaUtil工具类：接收Kafka数据，过滤空值数据
  */
 public class MyKafkaUtil {
+
+    private static Properties properties = new Properties();
+    static {
+        properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,"hadoop01:9092");
+    }
+
     public static FlinkKafkaConsumer<String> getKafkaConsumer(String topic,String group_id){
-        Properties properties = new Properties();
-        properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,"hadoop01:9092");
+
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG,group_id);
 
         return new FlinkKafkaConsumer<String>(topic, new KafkaDeserializationSchema<String>() {
@@ -41,7 +49,12 @@ public class MyKafkaUtil {
                 return BasicTypeInfo.STRING_TYPE_INFO;
             }
         },properties);
-
-
     }
+
+    public static FlinkKafkaProducer<String> getKafkaProducer(String topic) {
+        return new FlinkKafkaProducer<String>(topic,
+                new SimpleStringSchema(),
+                properties);
+    }
+
 }
