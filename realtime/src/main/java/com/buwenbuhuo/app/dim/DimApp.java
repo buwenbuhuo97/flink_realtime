@@ -1,6 +1,7 @@
 package com.buwenbuhuo.app.dim;
 
 import com.alibaba.fastjson.JSONObject;
+import com.buwenbuhuo.app.func.DimSinkFunction;
 import com.buwenbuhuo.app.func.TableProcessFunction;
 import com.buwenbuhuo.bean.TableProcess;
 import com.buwenbuhuo.util.MyKafkaUtil;
@@ -20,6 +21,10 @@ import org.apache.flink.util.OutputTag;
  * Create 2022-04-12 20:36
  * MyBlog https://buwenbuhuo.blog.csdn.net
  * Description: Dim主程序入口
+ * 数据流；
+ *  web/app -> Nginx -> 业务服务器 -> MySQL(Binlog) -> Maxwell -> Kafka(ODS) -> FlinkApp -> Phoenix(DIM)
+ * 程序：
+ *  Mock -> MySQL(Binlog) -> mxw.sh -> kafka(ZK) -> DimApp -> Phoenix(HBase HDFS/ZK)
  */
 public class DimApp {
     public static void main(String[] args) throws Exception {
@@ -88,7 +93,8 @@ public class DimApp {
 
 
         // TODO 8.将数据写出到Phoenix中
-        hbaseDS.print(">>>>>>>>>>>>");
+        // hbaseDS.print(">>>>>>>>>>>>");
+        hbaseDS.addSink(new DimSinkFunction());
 
 
         // TODO 9.启动任务
