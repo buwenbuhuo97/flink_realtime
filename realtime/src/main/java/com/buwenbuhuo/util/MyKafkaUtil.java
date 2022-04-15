@@ -11,6 +11,8 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import java.util.Properties;
 
+import static io.debezium.relational.history.KafkaDatabaseHistory.BOOTSTRAP_SERVERS;
+
 /**
  * Author 不温卜火
  * Create 2022-04-12 20:49
@@ -56,5 +58,36 @@ public class MyKafkaUtil {
                 new SimpleStringSchema(),
                 properties);
     }
+
+    /**
+     * Kafka-Source DDL 语句
+     * @param topic   数据源主题
+     * @param groupId 消费者组
+     * @return 拼接好的 Kafka 数据源 DDL 语句
+     */
+    public static String getKafkaDDL(String topic, String groupId) {
+        return " with ('connector' = 'kafka', " +
+                " 'topic' = '" + topic + "'," +
+                " 'properties.bootstrap.servers' = '" + BOOTSTRAP_SERVERS + "', " +
+                " 'properties.group.id' = '" + groupId + "', " +
+                " 'format' = 'json', " +
+                " 'scan.startup.mode' = 'latest-offset')";
+    }
+
+    /**
+     * Kafka-Sink DDL 语句
+     * @param topic 输出到 Kafka 的目标主题
+     * @return 拼接好的 Kafka-Sink DDL 语句
+     */
+    public static String getUpsertKafkaDDL(String topic) {
+        return "WITH ( " +
+                "  'connector' = 'upsert-kafka', " +
+                "  'topic' = '" + topic + "', " +
+                "  'properties.bootstrap.servers' = '" + BOOTSTRAP_SERVERS + "', " +
+                "  'key.format' = 'json', " +
+                "  'value.format' = 'json' " +
+                ")";
+    }
+
 
 }
