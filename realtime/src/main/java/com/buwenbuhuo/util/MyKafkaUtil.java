@@ -11,8 +11,6 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import java.util.Properties;
 
-import static io.debezium.relational.history.KafkaDatabaseHistory.BOOTSTRAP_SERVERS;
-
 /**
  * Author 不温卜火
  * Create 2022-04-12 20:49
@@ -22,8 +20,10 @@ import static io.debezium.relational.history.KafkaDatabaseHistory.BOOTSTRAP_SERV
 public class MyKafkaUtil {
 
     private static Properties properties = new Properties();
+    private static final String BOOTSTRAP_SERVERS = "hadoop01:9092";
+
     static {
-        properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,"hadoop01:9092");
+        properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
     }
 
     public static FlinkKafkaConsumer<String> getKafkaConsumer(String topic,String group_id){
@@ -61,6 +61,7 @@ public class MyKafkaUtil {
 
     /**
      * Kafka-Source DDL 语句
+     *
      * @param topic   数据源主题
      * @param groupId 消费者组
      * @return 拼接好的 Kafka 数据源 DDL 语句
@@ -74,12 +75,15 @@ public class MyKafkaUtil {
                 " 'scan.startup.mode' = 'latest-offset')";
     }
 
+
     /**
      * Kafka-Sink DDL 语句
+     *
      * @param topic 输出到 Kafka 的目标主题
      * @return 拼接好的 Kafka-Sink DDL 语句
      */
     public static String getUpsertKafkaDDL(String topic) {
+
         return "WITH ( " +
                 "  'connector' = 'upsert-kafka', " +
                 "  'topic' = '" + topic + "', " +
@@ -89,5 +93,16 @@ public class MyKafkaUtil {
                 ")";
     }
 
+
+    public static String getTopicDbDDL(String groupId) {
+        return "CREATE TABLE topic_db ( " +
+                "  `database` String, " +
+                "  `table` String, " +
+                "  `type` String, " +
+                "  `data` Map<String,String>, " +
+                "  `old` Map<String,String>, " +
+                "  `pt` AS PROCTIME() " +
+                ")" + MyKafkaUtil.getKafkaDDL("topic_db", groupId);
+    }
 
 }

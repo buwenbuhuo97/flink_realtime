@@ -7,30 +7,28 @@ package com.buwenbuhuo.util;
  * Description: 此工具类，用于维度退化
  */
 public class MysqlUtil {
-    public static String getBaseDicLookUpDDL() {
 
-        return "create table `base_dic`(\n" +
-                "`dic_code` string,\n" +
-                "`dic_name` string,\n" +
-                "`parent_code` string,\n" +
-                "`create_time` timestamp,\n" +
-                "`operate_time` timestamp,\n" +
-                "primary key(`dic_code`) not enforced\n" +
+    public static String getBaseDicLookUpDDL() {
+        return "create table `base_dic`( " +
+                "`dic_code` string, " +
+                "`dic_name` string, " +
+                "`parent_code` string, " +
+                "`create_time` timestamp, " +
+                "`operate_time` timestamp, " +
+                "primary key(`dic_code`) not enforced " +
                 ")" + MysqlUtil.mysqlLookUpTableDDL("base_dic");
     }
 
     public static String mysqlLookUpTableDDL(String tableName) {
-
-        String ddl = "WITH (\n" +
-                "'connector' = 'jdbc',\n" +
-                "'url' = 'jdbc:mysql://hadoop01:3306/gmall',\n" +
-                "'table-name' = '" + tableName + "',\n" +
-                "'lookup.cache.max-rows' = '10',\n" +
-                "'lookup.cache.ttl' = '1 hour',\n" +
-                "'username' = 'root',\n" +
-                "'password' = '123456',\n" +
-                "'driver' = 'com.mysql.cj.jdbc.Driver'\n" +
+        return "WITH ( " +
+                "'connector' = 'jdbc', " +
+                "'url' = 'jdbc:mysql://hadoop01:3306/gmall', " +
+                "'table-name' = '" + tableName + "', " +
+                "'lookup.cache.max-rows' = '100', " +
+                "'lookup.cache.ttl' = '1 hour', " +
+                "'username' = 'root', " +
+                "'password' = '123456', " +
+                "'driver' = 'com.mysql.cj.jdbc.Driver' " +
                 ")";
-        return ddl;
     }
 }
