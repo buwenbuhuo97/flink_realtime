@@ -16,11 +16,12 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class TableProcess {
     /**
-     * sourceTable  : 来源表
-     * sinkTable    : 输出表
-     * sinkColumns  : 输出字段
-     * sinkPk       : 主键字段
-     * sinkExtend   : 建表扩展
+     *  字段解释：
+     *      sourceTable  : 来源表
+     *      sinkTable    : 输出表
+     *      sinkColumns  : 输出字段
+     *      sinkPk       : 主键字段
+     *      sinkExtend   : 建表扩展
      */
     String sourceTable;
     String sinkTable;
