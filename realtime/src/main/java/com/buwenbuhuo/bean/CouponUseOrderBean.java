@@ -6,7 +6,7 @@ import lombok.Data;
  * Author 不温卜火
  * Create 2022-04-20 19:02
  * MyBlog https://buwenbuhuo.blog.csdn.net
- * Description:优惠券下单工具类
+ * Description:优惠券下单实体类
  */
 
 @Data

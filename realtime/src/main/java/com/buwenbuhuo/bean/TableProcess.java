@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
  * Author 不温卜火
  * Create 2022-04-12 21:28
  * MyBlog https://buwenbuhuo.blog.csdn.net
- * Description: MySQL配置表工具类
+ * Description: MySQL配置表实现类
  */
 
 @Data
