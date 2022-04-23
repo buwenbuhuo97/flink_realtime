@@ -20,15 +20,15 @@ public class DateFormatUtil {
     public static Long toTs(String dtStr, boolean isFull) {
         LocalDateTime localDateTime = null;
         if (isFull) {
-            localDateTime = LocalDateTime.parse(dtStr, dtfFull);
-        } else {
-            localDateTime = LocalDateTime.parse(dtStr, dtf);
+            dtStr = dtStr + " 00:00:00";
         }
+        localDateTime = LocalDateTime.parse(dtStr, dtfFull);
+
         return localDateTime.toInstant(ZoneOffset.of("+8")).toEpochMilli();
     }
 
     public static Long toTs(String dtStr) {
-        return toTs(dtStr, false);
+        return toTs(dtStr, true);
     }
 
     public static String toDate(Long ts) {
@@ -45,5 +45,6 @@ public class DateFormatUtil {
 
     public static void main(String[] args) {
         System.out.println(toYmdHms(System.currentTimeMillis()));
+        System.out.println(toTs("2022-04-23"));
     }
 }

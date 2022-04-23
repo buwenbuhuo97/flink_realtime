@@ -22,9 +22,7 @@ import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.util.Collector;
 import scala.Tuple4;
-
 import java.time.Duration;
-import java.time.ZoneId;
 
 /**
  * Author 不温卜火
@@ -105,7 +103,7 @@ public class DwsTrafficVcChArIsNewPageViewWindow {
         SingleOutputStreamOperator<TrafficPageViewBean> unionDS = trafficPageViewWithPvDS.union(
                 trafficPageViewWithUjDS,
                 trafficPageViewWithUvDS)
-                .assignTimestampsAndWatermarks(WatermarkStrategy.<TrafficPageViewBean>forBoundedOutOfOrderness(Duration.ofSeconds(2)).withTimestampAssigner(new SerializableTimestampAssigner<TrafficPageViewBean>() {
+                .assignTimestampsAndWatermarks(WatermarkStrategy.<TrafficPageViewBean>forBoundedOutOfOrderness(Duration.ofSeconds(13)).withTimestampAssigner(new SerializableTimestampAssigner<TrafficPageViewBean>() {
                     @Override
                     public long extractTimestamp(TrafficPageViewBean element, long recordTimestamp) {
                         return element.getTs();
@@ -122,7 +120,12 @@ public class DwsTrafficVcChArIsNewPageViewWindow {
         });
         WindowedStream<TrafficPageViewBean, Tuple4<String, String, String, String>, TimeWindow> windowedStream = keyedStream.window(TumblingEventTimeWindows.of(Time.seconds(10)));
 
-        // 使用reduce + apply完成需求
+        /**
+         *  reduce & apply的优点：
+         *       reduce：增量聚合  来一条聚合一条,效率高,存储空间占用少
+         *        apply：全量聚合  可以计算前百分比的结果、可以获取窗口信息
+         *  通过分析需求采用reduce + apply的方式完成需求
+         */
         SingleOutputStreamOperator<TrafficPageViewBean> reduceDS = windowedStream.reduce(
                 new ReduceFunction<TrafficPageViewBean>() {
                     @Override
