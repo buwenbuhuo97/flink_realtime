@@ -168,7 +168,7 @@ public class DwdTradeOrderDetail {
                 "    oc.coupon_id, " +
                 "    oc.coupon_use_id, " +
                 "    oc.create_time coupon_create_time, " +
-                "    dic.dic_name " +
+                "    dic.dic_name, " +
                 "    current_row_timestamp() ts " +
                 "from order_detail od " +
                 "join order_info oi " +

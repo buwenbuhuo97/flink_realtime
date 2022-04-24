@@ -51,9 +51,12 @@ public class DwsTradeCartAddUuWindow {
         SingleOutputStreamOperator<JSONObject> jsonObjWithWmDS = jsonObjDS.assignTimestampsAndWatermarks(WatermarkStrategy.<JSONObject>forBoundedOutOfOrderness(Duration.ofSeconds(2)).withTimestampAssigner(new SerializableTimestampAssigner<JSONObject>() {
             @Override
             public long extractTimestamp(JSONObject element, long recordTimestamp) {
-                // yyyy-MM-dd HH:mm:ss
-                String createTime = element.getString("create_time");
-                return DateFormatUtil.toTs(createTime, true);
+
+                String dateTime = element.getString("operate_time");
+                if (dateTime == null){
+                    dateTime = element.getString("create_time");
+                }
+                return DateFormatUtil.toTs(dateTime, true);
             }
         }));
 
@@ -82,8 +85,11 @@ public class DwsTradeCartAddUuWindow {
                 // 提取状态编程
                 String lastDt = lastCartAddDt.value();
                 // yyyy-MM-dd HH:mm:ss
-                String createTime = value.getString("create_time");
-                String curDt = createTime.split(" ")[0];
+                String dateTime = value.getString("operate_time");
+                if (dateTime == null){
+                    dateTime = value.getString("create_time");
+                }
+                String curDt = dateTime.split(" ")[0];
 
                 // 如果状态数据为null 或者与 当前日期不是同一天，则保留数据，更新状态
                 if (lastDt == null || !lastDt.equals(curDt)) {

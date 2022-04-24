@@ -1,33 +1,26 @@
 package com.buwenbuhuo.app.dws;
 
-
-import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.buwenbuhuo.app.func.OrderDetailFilterFunction;
 import com.buwenbuhuo.bean.TradeOrderBean;
 import com.buwenbuhuo.util.DateFormatUtil;
 import com.buwenbuhuo.util.MyClickHouseUtil;
-import com.buwenbuhuo.util.MyKafkaUtil;
-import com.buwenbuhuo.util.TimestampLtz3CompareUtil;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.AllWindowedStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.AllWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
-
 import java.time.Duration;
 
 /**
@@ -43,72 +36,10 @@ public class DwsTradeOrderWindow {
         env.setParallelism(1);
 
         // TODO 2.从 Kafka dwd_trade_order_detail 读取订单明细数据
-        String topic = "dwd_trade_order_detail";
         String groupId = "dws_trade_order_window_app";
-        DataStreamSource<String> orderDetailDS = env.addSource(MyKafkaUtil.getKafkaConsumer(topic, groupId));
+        SingleOutputStreamOperator<JSONObject> orderDetailJsonObjDs = OrderDetailFilterFunction.getDwdOrderDetail(env, groupId);
 
-
-        // TODO 3.过滤(""不需要，保留"insert") & 转换数据为JSON格式
-        SingleOutputStreamOperator<JSONObject> jsonObjDS = orderDetailDS.flatMap(new FlatMapFunction<String, JSONObject>() {
-            @Override
-            public void flatMap(String value, Collector<JSONObject> out) throws Exception {
-                if (!"".equals(value)) {
-                    JSONObject jsonObject = JSON.parseObject(value);
-                    if ("insert".equals(jsonObject.getString("type"))) {
-                        out.collect(jsonObject);
-                    }
-                }
-            }
-        });
-
-
-        // TODO 4.按照order_detail_id分组
-        KeyedStream<JSONObject, String> keyedByOrderDetailIdStream = jsonObjDS.keyBy(json -> json.getString("order_detail_id"));
-
-
-        // TODO 5.去重
-        SingleOutputStreamOperator<JSONObject> orderDetailJsonObjDs = keyedByOrderDetailIdStream.process(new KeyedProcessFunction<String, JSONObject, JSONObject>() {
-
-            private ValueState<JSONObject> orderDetailState;
-
-            @Override
-            public void open(Configuration parameters) throws Exception {
-                orderDetailState = getRuntimeContext().getState(new ValueStateDescriptor<JSONObject>("order-detail", JSONObject.class));
-            }
-
-            @Override
-            public void processElement(JSONObject value, Context ctx, Collector<JSONObject> out) throws Exception {
-                // 获取状态数据并判断是否有数据
-                JSONObject orderDetail = orderDetailState.value();
-
-                if (orderDetail == null) {
-                    // 把当前数据设置进状态并且注册定时器
-                    orderDetailState.update(value);
-                    ctx.timerService().registerProcessingTimeTimer(ctx.timerService().currentProcessingTime() + 2000L);
-                } else {
-                    // "2022-04-01 11:10:55.040Z"
-                    String stateTs = orderDetail.getString("ts");
-                    // "2022-04-01 11:10:55.04Z"
-                    String curTs = value.getString("ts");
-
-                    int compare = TimestampLtz3CompareUtil.compare(stateTs, curTs);
-                    if (compare != 1) { // 表示后到的数据时间大
-                        // 更新状态
-                        orderDetailState.update(value);
-                    }
-                }
-            }
-
-            @Override
-            public void onTimer(long timestamp, OnTimerContext ctx, Collector<JSONObject> out) throws Exception {
-                // 提取状态数据并输出
-                JSONObject orderDetail = orderDetailState.value();
-                out.collect(orderDetail);
-            }
-        });
-
-
-        // TODO 6.提取时间戳生成WaterMark
+        // TODO 3.提取时间戳生成WaterMark
         SingleOutputStreamOperator<JSONObject> jsonObjWithWmDS = orderDetailJsonObjDs.assignTimestampsAndWatermarks(WatermarkStrategy
                 .<JSONObject>forBoundedOutOfOrderness(Duration.ofSeconds(2)).withTimestampAssigner(new SerializableTimestampAssigner<JSONObject>() {
                     @Override
@@ -118,10 +49,10 @@ public class DwsTradeOrderWindow {
                     }
                 }));
 
-        // TODO 7.按照user_id分组
+        // TODO 4.按照user_id分组
         KeyedStream<JSONObject, String> keyedByUidStream = jsonObjWithWmDS.keyBy(json -> json.getString("user_id"));
 
-        // TODO 8.提取下单独立用户并转换为JavaBean对象
+        // TODO 5.提取下单独立用户并转换为JavaBean对象
         SingleOutputStreamOperator<TradeOrderBean> tradeOrderDS = keyedByUidStream.flatMap(new RichFlatMapFunction<JSONObject, TradeOrderBean>() {
 
             private ValueState<String> lastOrderDt;
@@ -179,7 +110,7 @@ public class DwsTradeOrderWindow {
             }
         });
 
-        // TODO 9.开窗、聚合
+        // TODO 6.开窗、聚合
         AllWindowedStream<TradeOrderBean, TimeWindow> windowedStream = tradeOrderDS.windowAll(TumblingEventTimeWindows.of(Time.seconds(10)));
         SingleOutputStreamOperator<TradeOrderBean> resultDS = windowedStream.reduce(new ReduceFunction<TradeOrderBean>() {
             @Override
@@ -207,13 +138,13 @@ public class DwsTradeOrderWindow {
             }
         });
 
-        // TODO 10.打印数据
+        // TODO 7.打印数据
         resultDS.print(">>>>>>");
 
-        // TODO 11.将数据输出到ClickHouse
+        // TODO 8.将数据输出到ClickHouse
         resultDS.addSink(MyClickHouseUtil.getClickHouseSink("insert into dws_trade_order_window values(?,?,?,?,?,?,?,?)"));
 
-        // TODO 12.启动任务
+        // TODO 9.启动任务
         env.execute("DwsTradeOrderWindow");
     }
 }

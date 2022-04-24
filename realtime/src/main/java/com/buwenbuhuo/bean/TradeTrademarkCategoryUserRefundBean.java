@@ -6,14 +6,14 @@ import lombok.Data;
 
 /**
  * Author 不温卜火
- * Create 2022-04-24 0:48
+ * Create 2022-04-24 14:58
  * MyBlog https://buwenbuhuo.blog.csdn.net
- * Description:DWS 层交易域品牌-品类-用户-SPU粒度下单各窗口实体类
+ * Description:交易域品牌-品类-用户粒度退单实体类
  */
 @Data
 @AllArgsConstructor
 @Builder
-public class TradeTrademarkCategoryUserSpuOrderBean {
+public class TradeTrademarkCategoryUserRefundBean {
     /**
      * 字段解释：
      *      stt                      : 窗口起始时间
@@ -26,13 +26,9 @@ public class TradeTrademarkCategoryUserSpuOrderBean {
      *      category2Name            : 二级品类名称
      *      category3Id              : 三级品类 ID
      *      category3Name            : 三级品类名称
-     *      orderIdSet               : 订单 ID
      *      skuId                    : sku_id
-     *      spuId                    : spu_id
-     *      orderIdSet               : 订单 ID
-     *      spuName                  : spu 名称
-     *      orderCount               : 下单次数
-     *      orderAmount              : 下单金额
+     *      userId                   ：用户 ID
+     *      refundCount              : 退单次数
      *      ts                       : 时间戳
      */
     String stt;
@@ -45,22 +41,17 @@ public class TradeTrademarkCategoryUserSpuOrderBean {
     String category2Name;
     String category3Id;
     String category3Name;
+
+
     @TransientSink
     String skuId;
+
     String userId;
-    String spuId;
-    String spuName;
-
-    // 作用是保留用户自己所给定的默认值
-    @Builder.Default
-    Long orderCount = 0L;
-
-    Double orderAmount;
+    Long refundCount;
     Long ts;
 
     public static void main(String[] args) {
-        TradeTrademarkCategoryUserSpuOrderBean build = builder()
-                .category2Id("1001").build();
+        TradeTrademarkCategoryUserRefundBean build = builder().build();
         System.out.println(build);
     }
 }
