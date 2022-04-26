@@ -27,9 +27,9 @@ public class JedisUtil {
         if(jedisPool == null){
             initJedisPool();
         }
+
         // System.out.println("----获取Jedis客户端-----");
-        Jedis jedis = jedisPool.getResource();
-        return jedis;
+        return jedisPool.getResource();
     }
 
     public static void main(String[] args) {
