@@ -4,9 +4,23 @@ import com.alibaba.fastjson.JSONObject;
 import com.buwenbuhuo.app.func.DimAsyncFunction;
 import com.buwenbuhuo.app.func.OrderDetailFilterFunction;
 import com.buwenbuhuo.bean.TradeTrademarkCategoryUserSpuOrderBean;
+import com.buwenbuhuo.util.DateFormatUtil;
+import com.buwenbuhuo.util.MyClickHouseUtil;
+import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.ReduceFunction;
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
+import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.datastream.WindowedStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
+import org.apache.flink.util.Collector;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -31,6 +45,7 @@ public class DwsTradeTrademarkCategoryUserSpuOrderWindow {
                 .userId(json.getString("user_id"))
                 .orderCount(1L)
                 .orderAmount(json.getDouble("split_total_amount"))
+                .ts(DateFormatUtil.toTs(json.getString("order_create_time"),true))
                 .build()
         );
 
@@ -45,14 +60,14 @@ public class DwsTradeTrademarkCategoryUserSpuOrderWindow {
                 new DimAsyncFunction<TradeTrademarkCategoryUserSpuOrderBean>("DIM_SKU_INFO") {
                     @Override
                     public String getKey(TradeTrademarkCategoryUserSpuOrderBean input) {
-                        System.out.println("=====" + input.getSkuId());
+                        // System.out.println("=====" + input.getSkuId());
                         return input.getSkuId();
                     }
 
                     @Override
                     public void join(TradeTrademarkCategoryUserSpuOrderBean input, JSONObject dimInfo) {
                         if (dimInfo != null) {
-                            System.out.println("SKU_ID===" + dimInfo.getString("SKU_ID"));
+                            System.out.println("SKU_ID === " + dimInfo.getString("SKU_ID"));
                             input.setSpuId(dimInfo.getString("SPU_ID"));
                             input.setTrademarkId(dimInfo.getString("TM_ID"));
                             input.setCategory3Id(dimInfo.getString("CATEGORY3_ID"));
@@ -112,7 +127,7 @@ public class DwsTradeTrademarkCategoryUserSpuOrderWindow {
                 new DimAsyncFunction<TradeTrademarkCategoryUserSpuOrderBean>("DIM_BASE_CATEGORY3") {
                     @Override
                     public String getKey(TradeTrademarkCategoryUserSpuOrderBean input) {
-                        System.out.println("input.getCategory3Id():" + input.getCategory3Id());
+                        // System.out.println("input.getCategory3Id():" + input.getCategory3Id());
                         return input.getCategory3Id();
                     }
 
@@ -171,19 +186,71 @@ public class DwsTradeTrademarkCategoryUserSpuOrderWindow {
                 60, TimeUnit.SECONDS);
 
         // 打印测试
-        withCategory1DS.print("withCategory1DS>>>>>>>>");
+        // withCategory1DS.print("withCategory1DS>>>>>>>>");
 
 
         // TODO 5.提取时间戳生成WaterMark
+        SingleOutputStreamOperator<TradeTrademarkCategoryUserSpuOrderBean> tradeTrademarkCategoryUserSpuOrderWithWmDS = withCategory1DS.assignTimestampsAndWatermarks(WatermarkStrategy.<TradeTrademarkCategoryUserSpuOrderBean>forBoundedOutOfOrderness(Duration.ofSeconds(2)).withTimestampAssigner(new SerializableTimestampAssigner<TradeTrademarkCategoryUserSpuOrderBean>() {
+            @Override
+            public long extractTimestamp(TradeTrademarkCategoryUserSpuOrderBean element, long recordTimestamp) {
+                return element.getTs();
+            }
+        }));
 
 
         // TODO 6.分组、开窗聚合
+        // 6.1 分组
+        KeyedStream<TradeTrademarkCategoryUserSpuOrderBean, String> keyedStream = tradeTrademarkCategoryUserSpuOrderWithWmDS.keyBy(new KeySelector<TradeTrademarkCategoryUserSpuOrderBean, String>() {
+            @Override
+            public String getKey(TradeTrademarkCategoryUserSpuOrderBean value) throws Exception {
+                return value.getUserId() + "-" +
+                        value.getCategory1Id() + "-" +
+                        value.getCategory1Name() + "-" +
+                        value.getCategory2Id() + "-" +
+                        value.getCategory2Name() + "-" +
+                        value.getCategory3Id() + "-" +
+                        value.getCategory3Name() + "-" +
+                        value.getSpuId() + "-" +
+                        value.getSpuName() + "-" +
+                        value.getTrademarkId() + "-" +
+                        value.getTrademarkName();
+            }
+        });
+
+        // 6.2 开窗
+        WindowedStream<TradeTrademarkCategoryUserSpuOrderBean, String, TimeWindow> windowedStream = keyedStream.window(TumblingEventTimeWindows.of(Time.seconds(10)));
+
+        // 6.3 聚合
+        SingleOutputStreamOperator<TradeTrademarkCategoryUserSpuOrderBean> resultDS = windowedStream.reduce(new ReduceFunction<TradeTrademarkCategoryUserSpuOrderBean>() {
+            @Override
+            public TradeTrademarkCategoryUserSpuOrderBean reduce(TradeTrademarkCategoryUserSpuOrderBean value1, TradeTrademarkCategoryUserSpuOrderBean value2) throws Exception {
+                value1.setOrderCount(value1.getOrderCount() + value2.getOrderCount());
+                value1.setOrderAmount(value1.getOrderAmount() + value2.getOrderAmount());
+                return value1;
+            }
+        }, new WindowFunction<TradeTrademarkCategoryUserSpuOrderBean, TradeTrademarkCategoryUserSpuOrderBean, String, TimeWindow>() {
+            @Override
+            public void apply(String s, TimeWindow window, Iterable<TradeTrademarkCategoryUserSpuOrderBean> input, Collector<TradeTrademarkCategoryUserSpuOrderBean> out) throws Exception {
+
+                // 获取数据
+                TradeTrademarkCategoryUserSpuOrderBean orderBean = input.iterator().next();
+
+                // 补充信息
+                orderBean.setTs(System.currentTimeMillis());
+                orderBean.setEdt(DateFormatUtil.toYmdHms(window.getEnd()));
+                orderBean.setStt(DateFormatUtil.toYmdHms(window.getStart()));
+
+                // 输出数据
+                out.collect(orderBean);
+            }
+        });
 
 
         // TODO 7.输出打印
-
+        resultDS.print(">>>>>>");
 
         // TODO 8.将数据写出到ClickHouse
+        resultDS.addSink(MyClickHouseUtil.getClickHouseSink("insert into dws_trade_trademark_category_user_spu_order_window values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
 
 
         // TODO 9.启动任务
