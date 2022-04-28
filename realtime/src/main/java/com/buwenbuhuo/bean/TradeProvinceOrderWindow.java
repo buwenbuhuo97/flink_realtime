@@ -3,6 +3,7 @@ package com.buwenbuhuo.bean;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import java.util.Set;
 
 /**
  * Author 不温卜火
@@ -20,6 +21,7 @@ public class TradeProvinceOrderWindow {
      *      stt                          : 窗口起始时间
      *      edt                          : 窗口结束时间
      *      provinceId                   ：省份 ID
+     *      orderIdSet                   : 订单 ID 集合，用于统计下单次数
      *      provinceName                 ：省份名称
      *      orderCount                   ：累计下单次数
      *      orderAmount                  : 累计下单金额
@@ -32,6 +34,8 @@ public class TradeProvinceOrderWindow {
     @Builder.Default
     String provinceName = "";
 
+    @TransientSink
+    Set<String> orderIdSet;
     Long orderCount;
 
     Double orderAmount;

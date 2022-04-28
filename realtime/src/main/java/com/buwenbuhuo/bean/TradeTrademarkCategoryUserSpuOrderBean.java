@@ -3,6 +3,7 @@ package com.buwenbuhuo.bean;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import java.util.Set;
 
 /**
  * Author 不温卜火
@@ -28,6 +29,8 @@ public class TradeTrademarkCategoryUserSpuOrderBean {
      *      category3Name            : 三级品类名称
      *      orderIdSet               : 订单 ID
      *      skuId                    : sku_id
+     *      orderIdSet               : 订单 ID 集合，用于统计下单次数
+     *      userId                   : 用户ID
      *      spuId                    : spu_id
      *      orderIdSet               : 订单 ID
      *      spuName                  : spu 名称
@@ -47,6 +50,10 @@ public class TradeTrademarkCategoryUserSpuOrderBean {
     String category3Name;
     @TransientSink
     String skuId;
+
+    @TransientSink
+    Set<String> orderIdSet;
+
     String userId;
     String spuId;
     String spuName;

@@ -19,6 +19,7 @@ import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.concurrent.TimeUnit;
 
 
@@ -40,15 +41,20 @@ public class DwsTradeProvinceOrderWindow {
 
 
         // TODO 3.将每行数据转换为Javabean
-        SingleOutputStreamOperator<TradeProvinceOrderWindow> tradeProvinceOrderDS = orderDetailJsonObjDS.map(json -> new TradeProvinceOrderWindow(
-                "",
-                "",
-                json.getString("province_id"),
-                "",
-                1L,
-                json.getDouble("split_total_amount"),
-                DateFormatUtil.toTs(json.getString("order_create_time"), true)
-        ));
+        SingleOutputStreamOperator<TradeProvinceOrderWindow> tradeProvinceOrderDS = orderDetailJsonObjDS.map(json -> {
+            HashSet<String> orderIdSet = new HashSet<>();
+            orderIdSet.add(json.getString("order_id"));
+
+            return new TradeProvinceOrderWindow(
+                    "",
+                    "",
+                    json.getString("province_id"),
+                    "",
+                    orderIdSet,
+                    0L,
+                    json.getDouble("split_total_amount"),
+                    DateFormatUtil.toTs(json.getString("order_create_time"), true));
+        });
 
         // TODO 4.提取时间戳生成WaterMark
         SingleOutputStreamOperator<TradeProvinceOrderWindow> tradeProvinceWithWmDS = tradeProvinceOrderDS.assignTimestampsAndWatermarks(WatermarkStrategy.
@@ -69,6 +75,10 @@ public class DwsTradeProvinceOrderWindow {
             public TradeProvinceOrderWindow reduce(TradeProvinceOrderWindow value1, TradeProvinceOrderWindow value2) throws Exception {
                 value1.setOrderCount(value1.getOrderCount() + value2.getOrderCount());
                 value1.setOrderAmount(value1.getOrderAmount() + value2.getOrderAmount());
+
+                // 合并订单ID的集合
+                value1.getOrderIdSet().addAll(value2.getOrderIdSet());
+
                 return value1;
             }
         }, new WindowFunction<TradeProvinceOrderWindow, TradeProvinceOrderWindow, String, TimeWindow>() {
@@ -81,6 +91,8 @@ public class DwsTradeProvinceOrderWindow {
                 provinceOrderWindow.setTs(System.currentTimeMillis());
                 provinceOrderWindow.setEdt(DateFormatUtil.toYmdHms(window.getEnd()));
                 provinceOrderWindow.setStt(DateFormatUtil.toYmdHms(window.getStart()));
+
+                provinceOrderWindow.setOrderCount((long) provinceOrderWindow.getOrderIdSet().size());
 
                 // 输出数据
                 out.collect(provinceOrderWindow);

@@ -7,23 +7,24 @@ import com.buwenbuhuo.bean.TradeTrademarkCategoryUserRefundBean;
 import com.buwenbuhuo.util.DateFormatUtil;
 import com.buwenbuhuo.util.MyClickHouseUtil;
 import com.buwenbuhuo.util.MyKafkaUtil;
-import com.buwenbuhuo.util.TimestampLtz3CompareUtil;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.functions.FilterFunction;
+import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
+import org.apache.flink.api.common.functions.RichFilterFunction;
+import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.*;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
-import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -31,7 +32,6 @@ import java.util.concurrent.TimeUnit;
  * Create 2022-04-24 15:04
  * MyBlog https://buwenbuhuo.blog.csdn.net
  * Description:交易域品牌-品类-用户粒度退单各窗口汇总表代码实现
- * 去重set自动去重 ，在TradeProvinceOrderWindow实体类 补充订单 ID 集合，用于统计下单次数
  */
 public class DwsTradeTrademarkCategoryUserRefundWindow {
     public static void main(String[] args) throws Exception {
@@ -39,100 +39,71 @@ public class DwsTradeTrademarkCategoryUserRefundWindow {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
 
-
-        // TODO 2.从 Kafka dwd_trade_order_refund 主题读取退单明细数据
+        // TODO 2.从 Kafka dwd_trade_order_refund 主题读取退单明细数据并创建流
         String topic = "dwd_trade_order_refund";
         String groupId = "dws_trade_trademark_category_user_refund_window_app";
-        DataStreamSource<String> userRefundlDS = env.addSource(MyKafkaUtil.getKafkaConsumer(topic, groupId));
+        DataStreamSource<String> kafkaDS = env.addSource(MyKafkaUtil.getKafkaConsumer(topic, groupId));
 
-        // TODO 3.过滤数据并转换为JSON对象
-        SingleOutputStreamOperator<String> filteredDS = userRefundlDS.filter(
-                new FilterFunction<String>() {
+        // TODO 3. 转换为JSON对象，然后过滤去重数据（使用状态编程的方式取第一条数据）
+        // 3.1 转换JSON对象
+        SingleOutputStreamOperator<JSONObject> jsonObjDS = kafkaDS.flatMap(new FlatMapFunction<String, JSONObject>() {
+            @Override
+            public void flatMap(String value, Collector<JSONObject> out) throws Exception {
+                if (!"".equals(value)) {
+                    out.collect(JSON.parseObject(value));
+                }
+            }
+        });
+
+        // 3.2 过滤去重数据
+        SingleOutputStreamOperator<JSONObject> filterDS = jsonObjDS.keyBy(json -> json.getString("id"))
+                .filter(new RichFilterFunction<JSONObject>() {
+
+                    private ValueState<String> valueState;
+
                     @Override
-                    public boolean filter(String jsonStr) throws Exception {
-                        if (jsonStr != null) {
-                            JSONObject jsonObj = JSON.parseObject(jsonStr);
-                            String provinceId = jsonObj.getString("province_id");
-                            if (provinceId != null) {
-                                return true;
-                            }
+                    public void open(Configuration parameters) throws Exception {
+                        ValueStateDescriptor<String> stateDescriptor = new ValueStateDescriptor<>("value-state", String.class);
+                        StateTtlConfig ttlConfig = new StateTtlConfig.Builder(Time.seconds(5))
+                                .setUpdateType(StateTtlConfig.UpdateType.OnReadAndWrite)
+                                .build();
+                        stateDescriptor.enableTimeToLive(ttlConfig);
+                        valueState = getRuntimeContext().getState(stateDescriptor);
+                    }
+
+                    @Override
+                    public boolean filter(JSONObject value) throws Exception {
+
+                        //取出状态数据
+                        String state = valueState.value();
+
+                        if (state == null) {
+                            valueState.update("1");
+                            return true;
+                        } else {
+                            return false;
                         }
-                        return false;
                     }
-                }
-        );
-        SingleOutputStreamOperator<JSONObject> mappedStream = filteredDS.map(JSON::parseObject);
+                });
 
 
-        // TODO 4.按照唯一键分组,主键为"id"
-        KeyedStream<JSONObject, String> keyedByStream = mappedStream.keyBy(json -> json.getString("id"));
-
-        // TODO 5. 去重
-        SingleOutputStreamOperator<JSONObject> processedDS = keyedByStream.process(new KeyedProcessFunction<String, JSONObject, JSONObject>() {
-
-            // 定义状态
-            private ValueState<JSONObject> lastValueState;
-
-            @Override
-            public void open(Configuration parameters) throws Exception {
-                super.open(parameters);
-                lastValueState = getRuntimeContext().getState(
-                        new ValueStateDescriptor<JSONObject>("last-value-state", JSONObject.class)
-                );
-            }
-
-
-            @Override
-            public void processElement(JSONObject jsonObj, Context ctx, Collector<JSONObject> out) throws Exception {
-                JSONObject lastValue = lastValueState.value();
-                if (lastValue == null) {
-                    ctx.timerService().registerProcessingTimeTimer(5000L);
-                    // 更新数据
-                    lastValueState.update(jsonObj);
-                } else {
-                    String lastRowOpTs = lastValue.getString("row_op_ts");
-                    String rowOpTs = jsonObj.getString("row_op_ts");
-                    if (TimestampLtz3CompareUtil.compare(lastRowOpTs, rowOpTs) <= 0) {
-                        lastValueState.update(jsonObj);
-                    }
-                }
-            }
-
-            @Override
-            public void onTimer(long timestamp, OnTimerContext ctx, Collector<JSONObject> out) throws Exception {
-                JSONObject lastValue = this.lastValueState.value();
-                if (lastValue != null) {
-                    out.collect(lastValue);
-                }
-                lastValueState.clear();
-            }
-        });
-
-        // TODO 6.转换数据结构
-        SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> JaveBeanDS = processedDS.map(json -> {
-            String orderId = json.getString("order_id");
-            String userId = json.getString("user_id");
-            String skuId = json.getString("sku_id");
-            Long ts = json.getLong("ts");
-
-            TradeTrademarkCategoryUserRefundBean trademarkCategoryUserRefundBean = TradeTrademarkCategoryUserRefundBean.builder()
-                    .refundCount(1L)
-                    .userId(userId)
-                    .skuId(skuId)
-                    .ts(ts)
-                    .build();
-
-            return trademarkCategoryUserRefundBean;
-        });
+        // TODO 4.将每行数据转换为JavaBean对象
+        SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> tradeTrademarkDS = filterDS.map(json ->
+                TradeTrademarkCategoryUserRefundBean
+                        .builder()
+                        .skuId(json.getString("sku_id"))
+                        .userId(json.getString("user_id"))
+                        .refundCount(1L)
+                        .ts(DateFormatUtil.toTs(json.getString("create_time"), true))
+                        .build());
 
         // 测试打印
-        JaveBeanDS.print("JaveBeanDS>>>>>>");
+        // tradeTrademarkDS.print("tradeTrademarkDS>>>>>>");
 
-
-        // TODO 7.关联维表信息
-        // 7.1 关联SKU
+        // TODO 5.关联维表信息
+        // 5.1 关联SKU
         SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> withSkuInfoDS = AsyncDataStream.unorderedWait(
-                JaveBeanDS,
+                tradeTrademarkDS,
                 new DimAsyncFunction<TradeTrademarkCategoryUserRefundBean>("DIM_SKU_INFO") {
                     @Override
                     public String getKey(TradeTrademarkCategoryUserRefundBean input) {
@@ -141,17 +112,17 @@ public class DwsTradeTrademarkCategoryUserRefundWindow {
 
                     @Override
                     public void join(TradeTrademarkCategoryUserRefundBean input, JSONObject dimInfo) {
-                        input.setTrademarkId(dimInfo.getString("TM_ID"));
                         input.setCategory3Id(dimInfo.getString("CATEGORY3_ID"));
+                        input.setTrademarkId(dimInfo.getString("TM_ID"));
                     }
                 },
                 60 * 5, TimeUnit.SECONDS
         );
 
         // 测试打印
-        withSkuInfoDS.print("withSkuInfoDS>>>>>>");
+        // withSkuInfoDS.print("withSkuInfoDS>>>>>>");
 
-        // 7.2 关联品牌表 base_trademark
+        // 5.2 关联品牌表 base_trademark
         SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> withTrademarkDS = AsyncDataStream.unorderedWait(
                 withSkuInfoDS,
                 new DimAsyncFunction<TradeTrademarkCategoryUserRefundBean>("DIM_BASE_TRADEMARK") {
@@ -169,9 +140,9 @@ public class DwsTradeTrademarkCategoryUserRefundWindow {
         );
 
         // 测试打印
-        withTrademarkDS.print("withTrademarkDS>>>>>>");
+        // withTrademarkDS.print("withTrademarkDS>>>>>>");
 
-        // 7.3 关联Category3
+        // 5.3 关联Category3
         SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> withCategory3DS = AsyncDataStream.unorderedWait(
                 withTrademarkDS,
                 new DimAsyncFunction<TradeTrademarkCategoryUserRefundBean>("DIM_BASE_CATEGORY3") {
@@ -190,10 +161,10 @@ public class DwsTradeTrademarkCategoryUserRefundWindow {
         );
 
         // 测试打印
-        withCategory3DS.print("withCategory3DS>>>>>>");
+        // withCategory3DS.print("withCategory3DS>>>>>>");
 
 
-        // 7.4 关联Category2
+        // 5.4 关联Category2
         SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> withCategory2DS = AsyncDataStream.unorderedWait(
                 withCategory3DS,
                 new DimAsyncFunction<TradeTrademarkCategoryUserRefundBean>("DIM_BASE_CATEGORY2") {
@@ -212,10 +183,10 @@ public class DwsTradeTrademarkCategoryUserRefundWindow {
         );
 
         // 测试打印
-        withCategory2DS.print("withCategory2DS>>>>>>");
+        // withCategory2DS.print("withCategory2DS>>>>>>");
 
 
-        // 7.5 关联Category1
+        // 5.5 关联Category1
         SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> withCategory1DS = AsyncDataStream.unorderedWait(
                 withCategory2DS,
                 new DimAsyncFunction<TradeTrademarkCategoryUserRefundBean>("DIM_BASE_CATEGORY1") {
@@ -233,40 +204,40 @@ public class DwsTradeTrademarkCategoryUserRefundWindow {
         );
 
         // 测试打印
-        withCategory1DS.print("withCategory1DS>>>>>>");
+        // withCategory1DS.print("withCategory1DS>>>>>>");
 
 
-        // TODO 8.设置水位线
+        // TODO 6.设置水位线
         SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> withWaterMarkDS = withCategory1DS.assignTimestampsAndWatermarks(WatermarkStrategy.
-                <TradeTrademarkCategoryUserRefundBean>forMonotonousTimestamps().withTimestampAssigner(new SerializableTimestampAssigner<TradeTrademarkCategoryUserRefundBean>() {
+                <TradeTrademarkCategoryUserRefundBean>forBoundedOutOfOrderness(Duration.ofSeconds(2)).withTimestampAssigner(new SerializableTimestampAssigner<TradeTrademarkCategoryUserRefundBean>() {
             @Override
             public long extractTimestamp(TradeTrademarkCategoryUserRefundBean element, long recordTimestamp) {
-                return element.getTs() * 1000;
+                return element.getTs();
             }
         }));
 
 
-        // TODO 9.分组、开窗、聚合
-        // 9.1 分组
+        // TODO 7.分组、开窗、聚合
+        // 7.1 分组
         KeyedStream<TradeTrademarkCategoryUserRefundBean, String> keyedAggDS = withWaterMarkDS.keyBy(new KeySelector<TradeTrademarkCategoryUserRefundBean, String>() {
             @Override
             public String getKey(TradeTrademarkCategoryUserRefundBean value) throws Exception {
-                return value.getTrademarkId() +
-                        value.getTrademarkName() +
-                        value.getTrademarkId() +
-                        value.getCategory1Name() +
-                        value.getCategory2Id() +
-                        value.getCategory2Name() +
-                        value.getCategory3Id() +
-                        value.getCategory3Name() +
+                return value.getTrademarkId() + "-" +
+                        value.getTrademarkName() + "-" +
+                        value.getTrademarkId() + "-" +
+                        value.getCategory1Name() + "-" +
+                        value.getCategory2Id() + "-" +
+                        value.getCategory2Name() + "-" +
+                        value.getCategory3Id() + "-" +
+                        value.getCategory3Name() + "-" +
                         value.getUserId();
             }
         });
 
-        // 9.2 开窗
-        WindowedStream<TradeTrademarkCategoryUserRefundBean, String, TimeWindow> windowDS = keyedAggDS.window(TumblingEventTimeWindows.of(Time.seconds(10)));
+        // 7.2 开窗
+        WindowedStream<TradeTrademarkCategoryUserRefundBean, String, TimeWindow> windowDS = keyedAggDS.window(TumblingEventTimeWindows.of(org.apache.flink.streaming.api.windowing.time.Time.seconds(10)));
 
-        // 9.3 聚合
+        // 7.3 聚合
         SingleOutputStreamOperator<TradeTrademarkCategoryUserRefundBean> resultDS = windowDS.reduce(new ReduceFunction<TradeTrademarkCategoryUserRefundBean>() {
             @Override
             public TradeTrademarkCategoryUserRefundBean reduce(TradeTrademarkCategoryUserRefundBean value1, TradeTrademarkCategoryUserRefundBean value2) throws Exception {
@@ -278,27 +249,26 @@ public class DwsTradeTrademarkCategoryUserRefundWindow {
             public void apply(String s, TimeWindow window, Iterable<TradeTrademarkCategoryUserRefundBean> input, Collector<TradeTrademarkCategoryUserRefundBean> out) throws Exception {
 
                 // 获取数据
-                TradeTrademarkCategoryUserRefundBean userRefundBean = input.iterator().next();
+                TradeTrademarkCategoryUserRefundBean refundBean = input.iterator().next();
 
                 // 补充信息
-                userRefundBean.setTs(System.currentTimeMillis());
-                userRefundBean.setEdt(DateFormatUtil.toYmdHms(window.getEnd()));
-                userRefundBean.setStt(DateFormatUtil.toYmdHms(window.getStart()));
+                refundBean.setTs(System.currentTimeMillis());
+                refundBean.setEdt(DateFormatUtil.toYmdHms(window.getEnd()));
+                refundBean.setStt(DateFormatUtil.toYmdHms(window.getStart()));
 
                 // 输出数据
-                out.collect(userRefundBean);
+                out.collect(refundBean);
             }
         });
 
-        // TODO 10.将数据写入到ClickHouse
-        // TODO 7.输出打印
+        // TODO 8.输出打印
         resultDS.print(">>>>>>");
 
-        // TODO 8.将数据写出到ClickHouse
+        // TODO 9.将数据写出到ClickHouse
         resultDS.addSink(MyClickHouseUtil.getClickHouseSink("insert into dws_trade_trademark_category_user_refund_window values(?,?,?,?,?,?,?,?,?,?,?,?,?)"));
 
 
-        // TODO 11.启动任务
+        // TODO 10.启动任务
         env.execute("DwsTradeTrademarkCategoryUserRefundWindow");
 
     }
