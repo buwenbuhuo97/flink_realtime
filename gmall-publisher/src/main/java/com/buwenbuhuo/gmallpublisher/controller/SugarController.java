@@ -1,17 +1,22 @@
 package com.buwenbuhuo.gmallpublisher.controller;
 
 import com.buwenbuhuo.gmallpublisher.service.GmvService;
+import com.buwenbuhuo.gmallpublisher.service.UvService;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import java.text.SimpleDateFormat;
+import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Author 不温卜火
  * Create 2022-04-28 15:31
  * MyBlog https://buwenbuhuo.blog.csdn.net
- * Description:GMV模块Controller层代码实现
+ * Description:Controller层代码实现
  */
 
 @RestController
@@ -84,9 +89,45 @@ public class SugarController {
                 "}";
     }
 
+
+    @Autowired
+    private UvService uvService;
+
+    @RequestMapping("/ch")
+    public String getUvByCh(@RequestParam(value = "date", defaultValue = "0") int date) {
+        if (date == 0) {
+            date = getToday();
+        }
+
+        // 获取数据
+        Map uvByCh = uvService.getUvByCh(date);
+        Set chs = uvByCh.keySet();
+        Collection uvs = uvByCh.values();
+
+        // 拼接JSON字符串并返回结果
+        return "{ " +
+                "  \"status\": 0, " +
+                "  \"msg\": \"\", " +
+                "  \"data\": { " +
+                "    \"categories\": [\" " +
+                StringUtils.join(chs, "\",\"") +
+                "   \" ], " +
+                "    \"series\": [ " +
+                "      { " +
+                "        \"name\": \"日活\", " +
+                "        \"data\": [ " +
+                StringUtils.join(uvs, ",") +
+                "        ] " +
+                "      } " +
+                "    ] " +
+                "  } " +
+                "}";
+    }
+
     private int getToday() {
         long ts = System.currentTimeMillis();
         SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd");
         return Integer.parseInt(sdf.format(ts));
     }
+
 }
